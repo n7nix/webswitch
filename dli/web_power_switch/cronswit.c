@@ -26,7 +26,7 @@
 #define RRDDIR "/media/backup/rrd/var/lib/cbw/rrdtemp"
 #define RRD_DATABASE_LOWPUMP "lowpumphouse"
 #define RRD_DATABASE_HIGHPUMP "highpumphouse"
-#define UPPER_TEMP 45
+#define UPPER_TEMP 42
 #define LOWER_TEMP 36
 
 int TurnHeater(int on_off);
@@ -92,12 +92,12 @@ int main(int argc, char **argv)
 
 	if( lowpumpTemp !=0 && highpumpTemp != 0) {
 
-		if(lowpumpTemp > uppertemp) {
+		if( (lowpumpTemp > uppertemp)  && (highpumpTemp > uppertemp) ) {
 			TurnHeater(0);
 
 			/* write to log file */
-			sprintf(buf, "cronswit: Heater off, Pump House temp is %d (limit=%d)",
-					lowpumpTemp, uppertemp);
+			sprintf(buf, "cronswit: Heater off, Pump House sensors: low %d, high %d (limit=%d)",
+					lowpumpTemp, highpumpTemp, uppertemp);
 			logger_updatefile(buf, LOGERRORFILE_NAME);
 			printf("%s\n", buf);
 
