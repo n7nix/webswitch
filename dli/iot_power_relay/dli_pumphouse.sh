@@ -21,6 +21,7 @@
 #  23  gpio. 4  16
 #  24  gpio. 5  18
 #  27  gpio. 2  13
+# DEBUG=1
 
 # set temperatures for when to turn light on/off
 UPPER_TEMP=42
@@ -29,6 +30,7 @@ LOWER_TEMP=36
 USER=$(whoami)
 scriptname="`basename $0`"
 read_temp="/home/$USER/bin/dht11_temp"
+PUMPHOUSE_LOGFILE="/home/$USER/var/log/pumphouse.log"
 
 # ==== Define which RPI gpio's to use
 # cut defines are for the gpio readall command
@@ -46,6 +48,8 @@ gpio_state_cut=6
 #wpi_num=gpio.27
 #gpio_mode_cut=11
 #gpio_state_cut=10
+
+function dbgecho { if [ ! -z "$DEBUG" ] ; then echo "$*"; fi }
 
 # ===== function usage
 function usage() {
@@ -76,10 +80,16 @@ function pump_heater() {
 
       get_temp
       if [ "$?" -eq 0 ] ; then
-          echo "Current temp is  $current_temp, loop cnt: $passcnt"
+          dbgecho "$(date "+%Y %m %d %T %Z"): Current temp is $current_temp, loop cnt: $passcnt" | tee -a $PUMPHOUSE_LOGFILE
           if (( current_temp > $UPPER_TEMP )) ; then
+              if [ "$state_gpio" == "1" ] ; then
+                  echo "$(date "+%Y %m %d %T %Z"): Temp: $current_temp, loop: $passcnt Changing state from on to OFF" | tee -a $PUMPHOUSE_LOGFILE
+              fi
               pump_heater_ctrl 0
           elif (( current_temp <= $LOWER_TEMP )) ; then
+              if [ "$state_gpio" == "0" ] ; then
+                  echo "$(date "+%Y %m %d %T %Z"): Temp: $current_temp, loop: $passcnt Changing state from off to ON" | tee -a $PUMPHOUSE_LOGFILE
+              fi
               pump_heater_ctrl 1
           fi
       fi
@@ -89,7 +99,7 @@ function pump_heater() {
 mode_gpio="$(gpio readall | grep -i "$wpi_num" | cut -d "|" -f $gpio_mode_cut | tr -d '[:space:]')"
 
 if [ "$mode_gpio" != "OUT" ] ; then
-   echo "gpio $gpio_num is in wrong mode: |$mode_gpio|, should be: OUT"
+   echo "$(date "+%Y %m %d %T %Z"): gpio $gpio_num is in wrong mode: |$mode_gpio|, should be: OUT" | tee -a $PUMPHOUSE_LOGFILE
    gpio -g mode $gpio_num out
 fi
 
@@ -112,7 +122,7 @@ case $arg in
       if [ "$state_gpio" == "1" ] ; then
          state_str="on"
       fi
-      echo "gpio $gpio_num is $state_str"
+      dbgecho "$(date "+%Y %m %d %T %Z"): gpio $gpio_num is $state_str" | tee -a $PUMPHOUSE_LOGFILE
       pump_heater
    ;;
 esac
