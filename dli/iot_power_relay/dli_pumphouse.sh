@@ -32,6 +32,11 @@ scriptname="`basename $0`"
 read_temp="/home/$USER/bin/dht11_temp"
 PUMPHOUSE_LOGFILE="/home/$USER/var/log/pumphouse.log"
 
+# for email
+SENDTO="gunn@beeble.localnet"
+tmpdir="$HOME/tmp"
+emailbody="${tmpdir}/emailtemp.txt"
+
 # ==== Define which RPI gpio's to use
 # cut defines are for the gpio readall command
 #gpio_num="17"
@@ -61,6 +66,7 @@ function pump_heater_ctrl() {
     on_off=$1
     gpio -g write $gpio_num $on_off
 }
+
 # ==== function get_temp()
 function get_temp() {
     passcnt=0
@@ -75,24 +81,57 @@ function get_temp() {
   return $retcode
 }
 
+# ===== function send_email
+function send_email() {
+    station=$(uname -n)
+    subject="Temp check: $current_temp from $station: $(date)"
+    mutt  -s "$subject" $SENDTO  < $emailbody
+}
+
 # ===== function pump_heater
 function pump_heater() {
+    bsendmail=false
 
-      get_temp
-      if [ "$?" -eq 0 ] ; then
-          dbgecho "$(date "+%Y %m %d %T %Z"): Current temp is $current_temp, loop cnt: $passcnt" | tee -a $PUMPHOUSE_LOGFILE
-          if (( current_temp > $UPPER_TEMP )) ; then
-              if [ "$state_gpio" == "1" ] ; then
-                  echo "$(date "+%Y %m %d %T %Z"): Temp: $current_temp, loop: $passcnt Changing state from on to OFF" | tee -a $PUMPHOUSE_LOGFILE
-              fi
-              pump_heater_ctrl 0
-          elif (( current_temp <= $LOWER_TEMP )) ; then
-              if [ "$state_gpio" == "0" ] ; then
-                  echo "$(date "+%Y %m %d %T %Z"): Temp: $current_temp, loop: $passcnt Changing state from off to ON" | tee -a $PUMPHOUSE_LOGFILE
-              fi
-              pump_heater_ctrl 1
-          fi
-      fi
+    get_temp
+    if [ "$?" -eq 0 ] ; then
+        stat_str1="$(date "+%Y %m %d %T %Z"): Current temp: $current_temp, upper: $UPPER_TEMP, lower: $LOWER_TEMP loop cnt: $passcnt, gpio: $state_gpio"
+        stat_str2="$(date "+%Y %m %d %T %Z"): Current temp: $current_temp, loop cnt: $passcnt, gpio: $state_gpio, state unchanged."
+        dbgecho $stat_str1 | tee -a $PUMPHOUSE_LOGFILE
+
+        # Test current temperature UPPER bound
+        if (( current_temp > $UPPER_TEMP )) ; then
+            if [ "$state_gpio" == "1" ] ; then
+                stat_str2="$(date "+%Y %m %d %T %Z"): Temp: $current_temp, loop: $passcnt Changing state: on to OFF"
+                echo $stat_str2 | tee -a $PUMPHOUSE_LOGFILE
+            fi
+            pump_heater_ctrl 0
+            bsendmail=true
+
+        # Test current temperature LOWER bound
+        elif (( current_temp <= $LOWER_TEMP )) ; then
+            if [ "$state_gpio" == "0" ] ; then
+                stat_str2="$(date "+%Y %m %d %T %Z"): Temp: $current_temp, loop: $passcnt Changing state: off to ON"
+                echo $stat_str2 | tee -a $PUMPHOUSE_LOGFILE
+            fi
+            pump_heater_ctrl 1
+            bsendmail=true
+        fi
+
+        # Send some email when temperature gets below some value
+        if (( current_temp < 34 )) ; then
+            bsendmail=true
+        else
+            echo "Pumphouse temp: $current_temp"
+        fi
+
+        if $bsendmail ; then
+            {
+            echo "$stat_str1"
+            echo "$stat_str2"
+            } > $emailbody
+            send_email
+        fi
+    fi
 }
 
 # ===== main
@@ -112,12 +151,22 @@ case $arg in
    off|Off|OFF)
       gpio -g write $gpio_num 0
       ;;
+   -d)
+      get_temp
+      state_gpio="$(gpio readall | grep -i "$wpi_num" | cut -d "|" -f $gpio_state_cut | tr -d '[:space:]')"
+      state_str="off"
+      if [ "$state_gpio" == "1" ] ; then
+         state_str="on"
+      fi
+
+      echo "gpio state: $state_str, temp: $current_temp, upper temp: $UPPER_TEMP, lower temp: $LOWER_TEMP"
+      ;;
    ?|h|H)
       usage
       ;;
    *)
       state_gpio="$(gpio readall | grep -i "$wpi_num" | cut -d "|" -f $gpio_state_cut | tr -d '[:space:]')"
-#      echo "debug: gpio state: $state_gpio"
+#
       state_str="off"
       if [ "$state_gpio" == "1" ] ; then
          state_str="on"
